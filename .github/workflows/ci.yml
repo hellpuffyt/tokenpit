@@ -1,0 +1,216 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: test
+        run: npm test
+
+      - name: build the app and the CLI on every OS/Node combination
+        run: npm run build && npm run build:cli
+
+  quality:
+    name: types, lint and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: tsc --noEmit (app + CLI projects)
+        run: npm run typecheck
+
+      - name: eslint
+        run: npm run lint
+
+      # vitest.config.ts declares 90%/85% thresholds; this fails the run if
+      # coverage regresses below them, it isn't just an informational report.
+      - name: coverage
+        run: npm run coverage
+
+  dogfood:
+    name: tokenpit judges its own bundled example tokens
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: install and build the CLI
+        run: npm ci && npm run build:cli
+
+      # These three tokens are src/lib/examples.ts's frozen fixtures (also
+      # covered by unit tests). Here we drive the *built* CLI end-to-end and
+      # assert its exact stdout and exit code — not just "it didn't crash".
+      - name: exact output for the alg:none example (critical, exit 1)
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected-alg-none.json <<'EOF'
+          {
+            "header": {
+              "typ": "JWT",
+              "alg": "none"
+            },
+            "payload": {
+              "sub": "admin",
+              "role": "admin",
+              "iat": 1735689600
+            },
+            "signatureVerified": null,
+            "findings": [
+              {
+                "id": "alg-none",
+                "severity": "critical",
+                "title": "\"alg\" is \"none\" — signature is not checked at all"
+              },
+              {
+                "id": "exp-missing",
+                "severity": "high",
+                "title": "\"exp\" (expiration) claim is missing"
+              },
+              {
+                "id": "aud-missing",
+                "severity": "low",
+                "title": "\"aud\" (audience) claim is missing"
+              },
+              {
+                "id": "iss-missing",
+                "severity": "low",
+                "title": "\"iss\" (issuer) claim is missing"
+              }
+            ]
+          }
+          EOF
+          set +e
+          node dist-cli/cli.js \
+            "eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTczNTY4OTYwMH0." \
+            --now 1735689600 > /tmp/actual-alg-none.json
+          code=$?
+          set -e
+          test "$code" = "1"
+          diff /tmp/expected-alg-none.json /tmp/actual-alg-none.json
+
+      - name: exact output for the weak-secret example (cracked, exit 1)
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected-weak.json <<'EOF'
+          {
+            "header": {
+              "alg": "HS256",
+              "typ": "JWT"
+            },
+            "payload": {
+              "sub": "admin",
+              "role": "admin",
+              "iat": 1735689600,
+              "exp": 1735693200
+            },
+            "signatureVerified": true,
+            "findings": [
+              {
+                "id": "hmac-secret-weak",
+                "severity": "critical",
+                "title": "Signature verifies against a known weak/example secret"
+              },
+              {
+                "id": "alg-confusion-hs-rs",
+                "severity": "medium",
+                "title": "HMAC algorithm — verify the key really is a shared secret"
+              },
+              {
+                "id": "aud-missing",
+                "severity": "low",
+                "title": "\"aud\" (audience) claim is missing"
+              },
+              {
+                "id": "iss-missing",
+                "severity": "low",
+                "title": "\"iss\" (issuer) claim is missing"
+              }
+            ]
+          }
+          EOF
+          set +e
+          node dist-cli/cli.js \
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTczNTY4OTYwMCwiZXhwIjoxNzM1NjkzMjAwfQ.2_X7D_KnlrOE9jHZnIBmirQi4MovMFnvYPnbaZ88c2A" \
+            --now 1735689600 > /tmp/actual-weak.json
+          code=$?
+          set -e
+          test "$code" = "1"
+          diff /tmp/expected-weak.json /tmp/actual-weak.json
+
+      - name: exact output for the healthy example given its real secret (exit 0)
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected-healthy.json <<'EOF'
+          {
+            "header": {
+              "alg": "HS256",
+              "typ": "JWT"
+            },
+            "payload": {
+              "sub": "user_8f2c1",
+              "iss": "https://auth.example.com",
+              "aud": "https://api.example.com",
+              "iat": 1735689600,
+              "exp": 1735690500
+            },
+            "signatureVerified": true,
+            "findings": [
+              {
+                "id": "alg-confusion-hs-rs",
+                "severity": "medium",
+                "title": "HMAC algorithm — verify the key really is a shared secret"
+              },
+              {
+                "id": "signature-valid",
+                "severity": "info",
+                "title": "Signature verifies against the provided key"
+              }
+            ]
+          }
+          EOF
+          node dist-cli/cli.js \
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzhmMmMxIiwiaXNzIjoiaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tIiwiYXVkIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS5jb20iLCJpYXQiOjE3MzU2ODk2MDAsImV4cCI6MTczNTY5MDUwMH0.tNfdMO7auMYe-SkPsiUIyc12NZKQs9V1AbpzN3fhxww" \
+            --secret "a-sufficiently-long-random-signing-key-32bytes+" \
+            --now 1735689600 > /tmp/actual-healthy.json
+          diff /tmp/expected-healthy.json /tmp/actual-healthy.json
