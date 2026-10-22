@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { LIVE_EXAMPLES } from "./lib/liveExamples";
 import { generateKeyPair, exportSPKI, SignJWT } from "jose";
+import { base64UrlEncodeBytes, base64UrlEncodeUtf8 } from "./lib/base64url";
+import { computeHmacSignature } from "./lib/verify";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -163,5 +165,24 @@ describe("App", () => {
     expect(await screen.findByText(/"sub": "u1"/)).toBeInTheDocument();
     expect(screen.queryByText(/signature verifies against/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/does not match the provided key/i)).not.toBeInTheDocument();
+  });
+
+  it("flags an HS256 token that verifies with a pasted PEM public key as an algorithm-confusion forgery", async () => {
+    const user = userEvent.setup();
+    const { publicKey } = await generateKeyPair("RS256", { modulusLength: 2048, extractable: true });
+    const pem = await exportSPKI(publicKey);
+    const enc = (o: unknown) => base64UrlEncodeUtf8(JSON.stringify(o));
+    const signingInput = `${enc({ alg: "HS256", typ: "JWT" })}.${enc({ sub: "u1" })}`;
+    const sig = base64UrlEncodeBytes(await computeHmacSignature(signingInput, "HS256", pem));
+
+    render(<App />);
+    await user.click(screen.getByLabelText(/^jwt$/i));
+    await user.paste(`${signingInput}.${sig}`);
+    await user.click(screen.getByLabelText(/hmac secret/i));
+    await user.paste(pem);
+
+    expect(await screen.findByTestId("finding-alg-confusion-forged")).toBeInTheDocument();
+    expect(screen.getByText(/public key used as the secret/i)).toHaveAttribute("role", "alert");
+    expect(screen.queryByTestId("finding-signature-valid")).not.toBeInTheDocument();
   });
 });

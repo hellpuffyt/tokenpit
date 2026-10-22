@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- An HS* token HMAC-signed with an RSA public key (the RS256->HS256
+  algorithm-confusion forgery) was reported as `signature-valid` (info) when
+  that public key was supplied as the secret. It is now the critical
+  `alg-confusion-forged` finding in both the CLI and the workbench.
+- `header-kid-suspicious` now also flags absolute paths into system
+  directories (`/dev/null`, `/etc/...`), Windows drive paths, shell
+  metacharacters (`|`, `&`, `$(`) and NUL bytes.
+- `npm run build:cli` no longer compiles test files into `dist-cli/`, and
+  vitest no longer collects build output (tests previously ran twice after a
+  CLI build).
+- Dev dependencies updated within their existing ranges to clear the vite,
+  undici, brace-expansion and source-map-js advisories.
+
+### Added
+
+- `src/lib/adversarial.test.ts`: attack-class regression suite.
+- `SECURITY.md`, `.editorconfig`, `docs/PRODUCTION_READINESS.md`.
+
 ## [0.1.0] - 2026-09-01
 
 ### Added

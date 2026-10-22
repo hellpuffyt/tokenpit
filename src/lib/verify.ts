@@ -120,6 +120,29 @@ export async function verifyRsaSignature(
   );
 }
 
+/**
+ * Heuristic: does this "secret" look like asymmetric public key material
+ * (a PEM public key / certificate, or a JWK carrying RSA/EC/OKP public
+ * parameters)? Used to recognise the RS256->HS256 algorithm-confusion
+ * attack, where the public key is (mis)used as an HMAC secret.
+ */
+export function looksLikePublicKey(key: string): boolean {
+  const trimmed = key.trim();
+  if (/-----BEGIN (RSA |EC )?PUBLIC KEY-----|-----BEGIN CERTIFICATE-----/.test(trimmed)) return true;
+  if (trimmed.startsWith("{")) {
+    try {
+      const jwk: unknown = JSON.parse(trimmed);
+      if (typeof jwk === "object" && jwk !== null && !Array.isArray(jwk)) {
+        const kty = (jwk as Record<string, unknown>)["kty"];
+        return kty === "RSA" || kty === "EC" || kty === "OKP";
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const buf = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(buf).set(bytes);

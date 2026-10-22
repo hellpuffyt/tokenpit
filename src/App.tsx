@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { decodeToken, TokenFormatError, type DecodedToken } from "./lib/decode";
 import { explainToken, type Finding } from "./lib/rules";
-import { isHmacAlg, isRsaAlg, verifyHmacSignature, verifyRsaSignature, crackWeakHmacSecret, assessSecretStrength } from "./lib/verify";
+import { isHmacAlg, isRsaAlg, verifyHmacSignature, verifyRsaSignature, crackWeakHmacSecret, assessSecretStrength, looksLikePublicKey } from "./lib/verify";
 import { LIVE_EXAMPLES } from "./lib/liveExamples";
 import { FindingsList } from "./components/FindingsList";
 import { JsonPanel } from "./components/JsonPanel";
@@ -98,8 +98,10 @@ function App() {
           ? false
           : undefined;
     const crackedSecret = verifyStatus.kind === "verified-weak" ? verifyStatus.secret : undefined;
-    return explainToken(decoded, { signatureVerified, crackedSecret });
-  }, [decoded, verifyStatus]);
+    const hmacKeyIsPublicKey =
+      verifyStatus.kind === "verified" && algStr !== undefined && isHmacAlg(algStr) && looksLikePublicKey(secret);
+    return explainToken(decoded, { signatureVerified, crackedSecret, hmacKeyIsPublicKey });
+  }, [decoded, verifyStatus, algStr, secret]);
 
   const secretStrength = secret.trim().length > 0 && algStr && isHmacAlg(algStr) ? assessSecretStrength(secret) : null;
 
@@ -185,7 +187,11 @@ function App() {
             </p>
           )}
 
-          <VerifyStatusLine status={verifyStatus} algStr={algStr} />
+          <VerifyStatusLine
+            status={verifyStatus}
+            algStr={algStr}
+            hmacKeyIsPublicKey={algStr !== undefined && isHmacAlg(algStr) && looksLikePublicKey(secret)}
+          />
         </section>
 
         <section className="claims-column" aria-label="Decoded token">
@@ -227,7 +233,15 @@ function App() {
   );
 }
 
-function VerifyStatusLine({ status, algStr }: { status: VerifyStatus; algStr: string | undefined }) {
+function VerifyStatusLine({
+  status,
+  algStr,
+  hmacKeyIsPublicKey,
+}: {
+  status: VerifyStatus;
+  algStr: string | undefined;
+  hmacKeyIsPublicKey: boolean;
+}) {
   switch (status.kind) {
     case "none":
       return null;
@@ -238,6 +252,13 @@ function VerifyStatusLine({ status, algStr }: { status: VerifyStatus; algStr: st
         </p>
       );
     case "verified":
+      if (hmacKeyIsPublicKey) {
+        return (
+          <p className="verify-status verify-critical" role="alert">
+            ✗ HMAC signature verifies with a public key used as the secret — algorithm-confusion forgery.
+          </p>
+        );
+      }
       return (
         <p className="verify-status verify-ok" role="status">
           ✓ Signature verifies against the provided key.

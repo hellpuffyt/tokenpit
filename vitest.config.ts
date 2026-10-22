@@ -8,6 +8,9 @@ export default defineConfig({
     globals: false,
     setupFiles: ["./src/test/setup.ts"],
     css: false,
+    // Never collect compiled output (dist-cli/ used to contain compiled
+    // copies of the test files, which then ran twice).
+    exclude: ["**/node_modules/**", "dist/**", "dist-cli/**", "coverage/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary", "lcov"],

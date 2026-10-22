@@ -33,7 +33,12 @@ function asNumericDate(v: JsonValue | undefined): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
-const SUSPICIOUS_KID_PATTERN = /(\.\.[/\\])|['";`]|(\bunion\b)|(\bselect\b)|(\bdrop\b)/i;
+// Path traversal (`../`), absolute paths into well-known system directories
+// (the classic `"kid": "/dev/null"` probe that makes the "key" an empty
+// file), SQL-injection punctuation/keywords, shell metacharacters used for
+// command injection (`|`, `&`, `$(`, backtick) and NUL bytes.
+const SUSPICIOUS_KID_PATTERN =
+  /(\.\.[/\\])|(^[/\\](dev|etc|proc|sys|tmp|var|usr|home|root)([/\\]|$))|(^[a-z]:[/\\])|['";`|&]|(\$\()|(\bunion\b)|(\bselect\b)|(\bdrop\b)/i;
 
 /**
  * Evaluate every rule against a decoded token and an optional bag of
@@ -48,6 +53,13 @@ export interface ExplainContext {
   signatureVerified?: boolean;
   /** Present when an HS256/384/512 secret produced a valid signature. */
   crackedSecret?: string | null;
+  /**
+   * True when the "secret" used for an HMAC verification is actually an
+   * asymmetric public key (PEM / JWK). A token that verifies under that
+   * condition is the RS256->HS256 algorithm-confusion forgery, not a
+   * legitimately signed token.
+   */
+  hmacKeyIsPublicKey?: boolean;
 }
 
 export function explainToken(decoded: DecodedToken, ctx: ExplainContext = {}): Finding[] {
@@ -186,7 +198,7 @@ export function explainToken(decoded: DecodedToken, ctx: ExplainContext = {}): F
   }
   if (header) {
     const kid = claim(header, "kid");
-    if (typeof kid === "string" && SUSPICIOUS_KID_PATTERN.test(kid)) {
+    if (typeof kid === "string" && (SUSPICIOUS_KID_PATTERN.test(kid) || kid.includes("\u0000"))) {
       findings.push({
         id: "header-kid-suspicious",
         severity: "high",
@@ -395,6 +407,16 @@ export function explainToken(decoded: DecodedToken, ctx: ExplainContext = {}): F
       title: "Signature does not verify against the provided key",
       detail: "The signature was checked and did not match — this token is not authentic for the key/secret you supplied.",
       recommendation: "Confirm you're using the correct key/secret and algorithm before trusting anything else about this token.",
+    });
+  } else if (ctx.signatureVerified === true && ctx.hmacKeyIsPublicKey) {
+    findings.push({
+      id: "alg-confusion-forged",
+      severity: "critical",
+      title: "HMAC signature verifies using a public key as the secret",
+      detail:
+        "This token declares an HMAC algorithm and its signature verifies when the supplied public key is used as the HMAC secret. That is exactly how an RS256->HS256 algorithm-confusion forgery is built: anyone who has the (public) key can mint tokens like this one. It is not evidence that the real key holder signed it.",
+      recommendation:
+        "Treat this token as forged. Fix the verifier to pin the expected algorithm per key (never take alg from the token) and never pass an asymmetric public key to an HMAC verify call.",
     });
   } else if (ctx.signatureVerified === true) {
     findings.push({

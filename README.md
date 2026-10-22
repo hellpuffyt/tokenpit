@@ -131,6 +131,12 @@ $ echo $?
 Exit code is `1` if any `critical`/`high` finding is present, `0` otherwise
 — so `tokenpit some.jwt.here` is a one-liner CI gate.
 
+The exit code reflects the threat-model severity, not whether the token is
+currently acceptable: an expired token (`exp-expired`) or a not-yet-valid
+one (`nbf-future`) is reported at `info` severity and, on its own, exits
+`0`. Without `--secret`, an HS* token whose secret is not in the built-in
+dictionary is not verified at all (`"signatureVerified": null`).
+
 ## The threat model, in full
 
 Every finding `explainToken()` can produce, grouped by what it looks at:
@@ -144,13 +150,16 @@ Every finding `explainToken()` can produce, grouped by what it looks at:
 - `header-jwk` (critical) — the token embeds its own verification key
 - `header-jku` (high) — the token points the verifier at a URL for the key
 - `header-x5c` (high) — the token embeds its own certificate chain
-- `header-kid-suspicious` (high) — `kid` looks like a path-traversal/SQLi probe
+- `header-kid-suspicious` (high) — `kid` looks like a path-traversal (`../`, `/dev/null`, `C:\`),
+  SQLi, shell-metacharacter or NUL-byte probe (a heuristic: an unflagged `kid` is not proven safe)
 - `header-crit` (medium) — `crit` header parameters most libraries don't actually enforce
 - `header-typ-unexpected` (low) — non-`JWT` `typ`, a cross-token-type replay vector
 
 **Signature**
 - `signature-empty` (critical) — a real `alg` declared, but zero signature bytes
 - `signature-valid` / `signature-invalid` / `hmac-secret-weak` — outcome of an attempted verification
+- `alg-confusion-forged` (critical) — an HS* signature verifies when the supplied "secret" is
+  actually a PEM public key/certificate or a public JWK: the RS256→HS256 forgery itself
 
 **Time-based claims (`exp`/`iat`/`nbf`)**
 - `exp-missing` (high), `exp-not-numeric` / `iat-not-numeric` / `nbf-not-numeric` (medium/low)
@@ -187,7 +196,7 @@ version and a separate CLI version that could drift apart.
 ```
 npm install
 npm run dev          # the workbench, at http://localhost:5173
-npm test              # vitest, 129 tests
+npm test              # vitest, 172 tests
 npm run coverage       # vitest with coverage thresholds enforced
 npm run lint            # eslint (typed)
 npm run typecheck        # tsc --noEmit, app project + CLI project
@@ -195,17 +204,23 @@ npm run build              # production web build -> dist/
 npm run build:cli           # CLI build -> dist-cli/
 ```
 
-Real numbers from this repository as shipped:
+Real numbers from `npm test` and `npm run coverage` on this repository
+(Node 24, macOS):
 
 ```
-Test Files  12 passed (12)
-     Tests  129 passed (129)
+Test Files  13 passed (13)
+     Tests  172 passed (172)
 
-Statements   : 98.24% ( 392/399 )
-Branches     : 95%    ( 323/340 )
-Functions    : 100%   ( 60/60 )
-Lines        : 99.72% ( 363/364 )
+Statements   : 98.09% ( 411/419 )
+Branches     : 95.1%  ( 350/368 )
+Functions    : 100%   ( 61/61 )
+Lines        : 99.73% ( 381/382 )
 ```
+
+`src/lib/adversarial.test.ts` is the attack-class regression suite:
+`alg: none` casing variants, a real RS256→HS256 forgery built with a
+generated RSA key, `exp`/`nbf` boundary seconds, `kid` injection probes,
+malformed segments, and a 2 MB token.
 
 ## Security note
 
