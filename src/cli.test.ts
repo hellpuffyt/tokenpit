@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { run } from "./cli";
 import { EXAMPLE_TOKENS, EXAMPLES_REFERENCE_UNIX_SECONDS } from "./lib/examples";
@@ -75,5 +76,12 @@ describe("cli run()", () => {
     expect(typeof code).toBe("number");
     const parsed = JSON.parse(lines[0]) as { header: unknown };
     expect(parsed.header).toBeDefined();
+  });
+});
+
+describe("CLI build configuration", () => {
+  it("does not compile test files into the shipped dist-cli/ output", () => {
+    const config = JSON.parse(readFileSync("tsconfig.cli.json", "utf8")) as { exclude?: string[] };
+    expect(config.exclude).toContain("src/**/*.test.ts");
   });
 });
