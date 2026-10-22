@@ -2,7 +2,7 @@
 import { pathToFileURL } from "node:url";
 import { decodeToken, TokenFormatError } from "./lib/decode.js";
 import { explainToken } from "./lib/rules.js";
-import { isHmacAlg, verifyHmacSignature, crackWeakHmacSecret } from "./lib/verify.js";
+import { isHmacAlg, verifyHmacSignature, crackWeakHmacSecret, looksLikePublicKey } from "./lib/verify.js";
 
 interface CliOptions {
   token?: string;
@@ -62,11 +62,13 @@ export async function run(argv: string[], stdout: (s: string) => void): Promise<
 
   let signatureVerified: boolean | undefined;
   let crackedSecret: string | null | undefined;
+  let hmacKeyIsPublicKey = false;
 
   const alg = decoded.header.json?.["alg"];
   if (typeof alg === "string" && isHmacAlg(alg)) {
     if (opts.secret !== undefined) {
       signatureVerified = await verifyHmacSignature(decoded, alg, opts.secret);
+      hmacKeyIsPublicKey = looksLikePublicKey(opts.secret);
     } else {
       crackedSecret = await crackWeakHmacSecret(decoded, alg);
       if (crackedSecret) signatureVerified = true;
@@ -77,6 +79,7 @@ export async function run(argv: string[], stdout: (s: string) => void): Promise<
   if (opts.now !== undefined && !Number.isNaN(opts.now)) explainCtx.now = new Date(opts.now * 1000);
   if (signatureVerified !== undefined) explainCtx.signatureVerified = signatureVerified;
   if (crackedSecret !== undefined) explainCtx.crackedSecret = crackedSecret;
+  if (hmacKeyIsPublicKey) explainCtx.hmacKeyIsPublicKey = true;
   const findings = explainToken(decoded, explainCtx);
 
   const result = {
