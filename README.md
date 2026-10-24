@@ -12,7 +12,8 @@ It ships two things built on one shared, dependency-free core:
 - **A live decode-as-you-type workbench** (React + Vite) — paste a token,
   optionally a secret or public key, and watch the decoded header/payload
   and a severity-ranked findings list update as you type.
-- **A CLI** (`tokenpit <token>`) that runs the same analysis headlessly and
+- **A CLI** (`node dist-cli/cli.js <token>`; there is no installed
+  `tokenpit` binary) that runs the same analysis headlessly and
   prints JSON, for scripting a JWT into a CI check or a terminal.
 
 Everything — decoding, HMAC/RSA verification, the weak-secret dictionary
@@ -129,7 +130,7 @@ $ echo $?
 ```
 
 Exit code is `1` if any `critical`/`high` finding is present, `0` otherwise
-— so `tokenpit some.jwt.here` is a one-liner CI gate.
+— so `node dist-cli/cli.js some.jwt.here` is a one-liner CI gate.
 
 The exit code reflects the threat-model severity, not whether the token is
 currently acceptable: an expired token (`exp-expired`) or a not-yet-valid
@@ -211,8 +212,8 @@ Real numbers from `npm test` and `npm run coverage` on this repository
 Test Files  13 passed (13)
      Tests  172 passed (172)
 
-Statements   : 98.09% ( 411/419 )
-Branches     : 95.1%  ( 350/368 )
+Statements   : 98.56% ( 413/419 )
+Branches     : 95.65% ( 352/368 )
 Functions    : 100%   ( 61/61 )
 Lines        : 99.73% ( 381/382 )
 ```
