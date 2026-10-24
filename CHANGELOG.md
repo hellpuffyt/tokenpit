@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Dev dependencies: `vitest`/`@vitest/coverage-v8` 4.1.12 (GHSA-qxg6-89mg-rqv8,
+  GHSA-xp26-3454-mjgp) and transitive `zod` 4.6.7 (GHSA-mrhx-c7xc-m3w5).
+  `npm audit` is clean.
+
 ### Fixed
 
 - An HS* token HMAC-signed with an RSA public key (the RS256->HS256
